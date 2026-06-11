@@ -18,7 +18,7 @@ source .venv/bin/activate
 python voice_daemon.py
 ```
 
-Press and hold **Insert** to record (300ms arm delay prevents accidental taps), release to transcribe.
+Press and hold **Right Shift** to record (300ms arm delay prevents accidental taps), release to transcribe.
 
 ## Configuration
 
@@ -28,7 +28,7 @@ Config file at `~/.config/voice-input/config.toml` (all fields optional):
 prompt = "медицинская диктовка: анамнез, диагноз, терапия"
 model = "/projects/ai/whisper.cpp/models/ggml-small.bin"
 binary = "/projects/ai/whisper.cpp/build/bin/whisper-cli"
-key = "insert"
+key = "shift_r"
 mode = "push-to-talk"
 ```
 
@@ -40,7 +40,7 @@ CLI flags override config file values:
 | `--model PATH` | `ggml-small.bin` | Whisper model path |
 | `--binary PATH` | `whisper-cli` | Whisper binary path |
 | `--prompt TEXT` | `""` | Initial prompt for transcription context |
-| `--key NAME` | `insert` | Hotkey (insert, f1, f2, space, etc.) |
+| `--key NAME` | `shift_r` | Hotkey (insert, f1, f2, space, etc.) |
 | `--mode NAME` | `push-to-talk` | Operating mode (push-to-talk or toggle) |
 
 Example with prompt:
