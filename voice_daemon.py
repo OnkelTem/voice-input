@@ -2,12 +2,18 @@
 import argparse
 import datetime
 import os
-import queue
 import subprocess
+import sys
 import tempfile
 import threading
 import time
 import tomllib
+from enum import IntEnum
+import ctypes
+from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
+from PyQt5.QtCore import QTimer
+from PyQt5.QtGui import QIcon, QPixmap, QImage
+from PIL import Image, ImageDraw
 
 import numpy as np
 import pynput.keyboard as kb
@@ -16,18 +22,24 @@ import sounddevice as sd
 
 FS = 16000
 RECORDING = False
-SEGMENT_BUFFER = []
-SILENCE_FRAMES = 0
-SPEECH_ACTIVE = False
-SEGMENT_QUEUE = queue.Queue()
-TRANSCRIBER_THREAD = None
+AUDIO_BUFFER = []
 STREAM = None
 PRESS_TIME = 0.0
 RECORD_START = 0.0
 ARM_TIMER = None
 CFG = {}
+LISTENER = None
 
 FRAMES_PER_BLOCK = 512
+
+
+class AppState(IntEnum):
+    IDLE = 0
+    RECORDING = 1
+    TRANSCRIBING = 2
+
+
+app_state = ctypes.c_int(0)
 
 
 def log(msg: str) -> None:
@@ -42,9 +54,6 @@ def load_config(config_path: str) -> dict:
         "binary": "/projects/ai/whisper.cpp/build/bin/whisper-cli",
         "key": "insert",
         "prompt": "",
-        "vad_threshold": 0.005,
-        "vad_silence_ms": 2000,
-        "vad_min_segment_ms": 300,
     }
     try:
         with open(config_path, "rb") as f:
@@ -77,66 +86,66 @@ def build_config() -> dict:
         if v is not None:
             cfg[k] = v
     cfg["key"] = getattr(kb.Key, cfg["key"].lower(), kb.Key.insert)
-    cfg["_silence_limit_blocks"] = int(cfg["vad_silence_ms"] * FS / (FRAMES_PER_BLOCK * 1000))
-    cfg["_min_segment_blocks"] = int(cfg["vad_min_segment_ms"] * FS / (FRAMES_PER_BLOCK * 1000))
     return cfg
 
 
-def notify(msg: str) -> None:
-    subprocess.run(["notify-send", "-t", "1500", "Voice Input", msg],
-                   capture_output=True)
+def _generate_tone(freq: float, duration_ms: int = 80, fs: int = 22050) -> np.ndarray:
+    n = int(fs * duration_ms / 1000)
+    t = np.arange(n) / fs
+    tone = np.sin(2 * np.pi * freq * t)
+    fade = int(fs * 0.005)
+    tone[:fade] *= np.linspace(0, 1, fade)
+    tone[-fade:] *= np.linspace(1, 0, fade)
+    return (tone * 0.2).astype(np.float32)
+
+
+def _play_tone(tone: np.ndarray, fs: int = 22050) -> None:
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+        tmp = f.name
+        wav.write(tmp, fs, tone)
+    try:
+        subprocess.run(["paplay", tmp], capture_output=True)
+    finally:
+        os.unlink(tmp)
+
+
+def play_start_beep():
+    _play_tone(_generate_tone(1000, 120))
+
+
+def generate_icons() -> dict[AppState, QIcon]:
+    def _draw_mic(draw, color):
+        draw.rounded_rectangle([(17, 8), (31, 28)], radius=4, fill=color)
+        for y in (14, 18, 22):
+            draw.line([(19, y), (29, y)], fill=(255, 255, 255, 128), width=1)
+        draw.rectangle([(22, 28), (26, 36)], fill=color)
+        draw.rectangle([(16, 35), (32, 37)], fill=color)
+
+    icons = {}
+    for state, color, overlay in (
+        (AppState.IDLE, "#888888", None),
+        (AppState.RECORDING, "#E53935", (38, 38, 5, "#E53935")),
+        (AppState.TRANSCRIBING, "#1976D2", None),
+    ):
+        img = Image.new("RGBA", (48, 48), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(img)
+        _draw_mic(draw, color)
+        if state == AppState.RECORDING:
+            draw.ellipse([(33, 33), (43, 43)], fill="#E53935")
+        elif state == AppState.TRANSCRIBING:
+            for cx in (34, 37, 40):
+                draw.ellipse([(cx - 2, 36), (cx + 2, 40)], fill="#1976D2")
+        qimage = QImage(img.tobytes(), 48, 48, QImage.Format_RGBA8888)
+        pix = QPixmap.fromImage(qimage)
+        icons[state] = QIcon(pix)
+    return icons
 
 
 def callback(indata, frames, time, status):
-    global SEGMENT_BUFFER, SILENCE_FRAMES, RECORDING, SPEECH_ACTIVE
+    global AUDIO_BUFFER
     if not RECORDING:
         return
-    SEGMENT_BUFFER.append(indata.copy())
-    rms = np.sqrt(np.mean(indata**2))
-    if rms > CFG["vad_threshold"]:
-        SILENCE_FRAMES = 0
-        SPEECH_ACTIVE = True
-    else:
-        SILENCE_FRAMES += 1
-        if (SPEECH_ACTIVE
-                and SILENCE_FRAMES > CFG["_silence_limit_blocks"]
-                and len(SEGMENT_BUFFER) > CFG["_min_segment_blocks"]
-                and SEGMENT_QUEUE.qsize() <= 5):
-            data = np.concatenate(SEGMENT_BUFFER)
-            SEGMENT_QUEUE.put(data)
-            log(f"Segment queued ({len(data)/FS:.1f}s)")
-            SEGMENT_BUFFER.clear()
-            SILENCE_FRAMES = 0
-            SPEECH_ACTIVE = False
-
-
-def transcriber_loop():
-    while True:
-        segment = SEGMENT_QUEUE.get()
-        if segment is None:
-            break
-        log(f"Transcribing segment ({len(segment)/FS:.1f}s)...")
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            tmp = f.name
-            wav.write(tmp, FS, segment)
-        try:
-            args = [CFG["binary"], "-m", CFG["model"], "-f", tmp, "--no-timestamps"]
-            if CFG["prompt"]:
-                args += ["--prompt", CFG["prompt"]]
-            args += ["-l", "auto"]
-            result = subprocess.run(args, capture_output=True, text=True, timeout=30)
-            text = result.stdout.strip()
-            if text:
-                if text[-1] in ".?!":
-                    text += " "
-                subprocess.run(["xdotool", "type", text])
-                log(f"Segment transcribed: {text}")
-            else:
-                log("No speech detected in segment")
-        except Exception as e:
-            log(f"Transcription error: {e}")
-        finally:
-            os.unlink(tmp)
+    AUDIO_BUFFER.append(indata.copy())
 
 
 def on_press(key):
@@ -154,24 +163,20 @@ def on_press(key):
 
 
 def _arm_timer():
-    global RECORDING, STREAM, ARM_TIMER, RECORD_START, SILENCE_FRAMES, TRANSCRIBER_THREAD, SPEECH_ACTIVE
+    global RECORDING, STREAM, ARM_TIMER, RECORD_START, AUDIO_BUFFER
     ARM_TIMER = None
     RECORDING = True
-    SEGMENT_BUFFER.clear()
-    SILENCE_FRAMES = 0
-    SPEECH_ACTIVE = False
+    app_state.value = AppState.RECORDING
+    AUDIO_BUFFER.clear()
+    log("Recording started")
+    play_start_beep()
     STREAM = sd.InputStream(samplerate=FS, channels=1, callback=callback, blocksize=FRAMES_PER_BLOCK)
     STREAM.start()
     RECORD_START = time.monotonic()
-    notify("Recording...")
-    log("Recording started")
-    if TRANSCRIBER_THREAD is None or not TRANSCRIBER_THREAD.is_alive():
-        TRANSCRIBER_THREAD = threading.Thread(target=transcriber_loop)
-        TRANSCRIBER_THREAD.start()
 
 
 def on_release(key):
-    global RECORDING, SEGMENT_BUFFER, STREAM, ARM_TIMER, RECORD_START, PRESS_TIME, TRANSCRIBER_THREAD, SPEECH_ACTIVE
+    global RECORDING, AUDIO_BUFFER, STREAM, ARM_TIMER, RECORD_START, PRESS_TIME
     if key != CFG["key"]:
         return
     if CFG["mode"] != "push-to-talk":
@@ -179,7 +184,7 @@ def on_release(key):
     if ARM_TIMER is not None:
         ARM_TIMER.cancel()
         ARM_TIMER = None
-        log("Key released — arm cancelled")
+        log("Key released \u2014 arm cancelled")
         return
     if not RECORDING:
         return
@@ -191,25 +196,95 @@ def on_release(key):
     log("Key released")
     elapsed = time.monotonic() - PRESS_TIME
     if elapsed < 2.0:
-        notify("Cancelled")
         log("Recording cancelled (too short)")
-        SEGMENT_BUFFER.clear()
-        SILENCE_FRAMES = 0
-        SPEECH_ACTIVE = False
-        SEGMENT_QUEUE.put(None)
-        if TRANSCRIBER_THREAD:
-            TRANSCRIBER_THREAD.join()
+        AUDIO_BUFFER.clear()
+        app_state.value = AppState.IDLE
         return
-    if SEGMENT_BUFFER and SPEECH_ACTIVE:
-        data = np.concatenate(SEGMENT_BUFFER)
-        SEGMENT_QUEUE.put(data)
-        log(f"Final segment queued ({len(data)/FS:.1f}s)")
-        SEGMENT_BUFFER.clear()
-    SEGMENT_QUEUE.put(None)
-    if TRANSCRIBER_THREAD:
-        TRANSCRIBER_THREAD.join()
-    notify("Done")
+    app_state.value = AppState.TRANSCRIBING
+    if AUDIO_BUFFER:
+        data = np.concatenate(AUDIO_BUFFER)
+        AUDIO_BUFFER.clear()
+        log(f"Transcribing ({len(data)/FS:.1f}s)...")
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            tmp = f.name
+            wav.write(tmp, FS, data)
+        try:
+            args = [CFG["binary"], "-m", CFG["model"], "-f", tmp, "--no-timestamps"]
+            if CFG["prompt"]:
+                args += ["--prompt", CFG["prompt"]]
+            args += ["-l", "auto"]
+            result = subprocess.run(args, capture_output=True, text=True, timeout=30)
+            text = result.stdout.strip()
+            if text:
+                if text[-1] in ".?!":
+                    text += " "
+                subprocess.run(["xdotool", "type", text])
+                log(f"Transcribed: {text}")
+            else:
+                log("No speech detected")
+        except Exception as e:
+            log(f"Transcription error: {e}")
+        finally:
+            os.unlink(tmp)
+    app_state.value = AppState.IDLE
     log("Transcription complete")
+
+
+class TrayApp:
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.app = QApplication(sys.argv)
+        self.app.setQuitOnLastWindowClosed(False)
+
+        self.icons = generate_icons()
+
+        self.tray = QSystemTrayIcon()
+        self.tray.setIcon(self.icons[AppState.IDLE])
+        self.tray.setToolTip("Voice Input \u2014 Idle")
+        self.tray.setVisible(True)
+
+        menu = QMenu()
+        quit_action = QAction("Quit")
+        quit_action.triggered.connect(self.quit)
+        menu.addAction(quit_action)
+        self.tray.setContextMenu(menu)
+
+        self.timer = QTimer()
+        self.timer.timeout.connect(self.update_icon)
+        self.timer.start(200)
+        self._prev_state = AppState.IDLE
+
+    def update_icon(self):
+        state = AppState(app_state.value)
+        if state != self._prev_state:
+            self.tray.setIcon(self.icons[state])
+            self._prev_state = state
+        tips = {
+            AppState.IDLE: "Voice Input \u2014 Idle",
+            AppState.RECORDING: "Voice Input \u2014 Recording...",
+            AppState.TRANSCRIBING: "Voice Input \u2014 Transcribing...",
+        }
+        self.tray.setToolTip(tips[state])
+
+    def quit(self):
+        global RECORDING, STREAM, LISTENER
+        if LISTENER:
+            LISTENER.stop()
+        if RECORDING:
+            RECORDING = False
+            if STREAM:
+                STREAM.stop()
+                STREAM.close()
+                STREAM = None
+        self.app.quit()
+
+    def run(self):
+        global LISTENER
+        LISTENER = kb.Listener(on_press=on_press, on_release=on_release)
+        LISTENER.daemon = True
+        LISTENER.start()
+        self.timer.start()
+        sys.exit(self.app.exec())
 
 
 def main():
@@ -223,9 +298,7 @@ def main():
     log(f"Binary: {CFG['binary']}")
     log(f"Mode: {CFG['mode']}")
     log(f"Ready. Hold {CFG['key'].name} to record")
-    notify("Voice input daemon started")
-    with kb.Listener(on_press=on_press, on_release=on_release) as listener:
-        listener.join()
+    TrayApp(CFG).run()
 
 
 if __name__ == "__main__":

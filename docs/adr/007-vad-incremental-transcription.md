@@ -2,7 +2,11 @@
 
 ## Статус
 
-Accepted
+Superseded
+
+VAD + incremental transcription was reverted in task 005. The energy-based VAD
+caused unpredictable splits during natural pauses, making the user experience
+worse than single-block transcription on key release. See `.tasks/history/005-revert-vad.md`.
 
 ## Контекст
 

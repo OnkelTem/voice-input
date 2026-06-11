@@ -19,14 +19,23 @@ python voice_daemon.py
   - Model: `/projects/ai/whisper.cpp/models/ggml-small.bin`
 - **Language**: Auto-detect (`-l auto`).
 - **Text output**: `xdotool type` types into active window.
-- **VAD**: Энергетический детектор (RMS) прямо в callback sounddevice. При паузе > `vad_silence_ms` сегмент уходит в `queue.Queue`; фоновый поток транскрибирует инкрементально. Флаг `SPEECH_ACTIVE` предотвращает сплиты тишины после речи.
+- **Tray icon**: PyQt5 `QSystemTrayIcon` shows state (idle/recording/transcribing) with three Pillow-generated microphone icons (gray/red/blue). A `QTimer(200ms)` polls a `ctypes.c_int` shared with pynput callbacks. Context menu: Quit.
+- **Start beep**: 1000 Hz sine wave (80ms, 20% amplitude) generated with numpy, played via `paplay` before the recording stream opens.
 
 ## External dependencies (system-level)
 
 - `xdotool` — text injection (via XTEST)
-- `libnotify-bin` — desktop notifications (`notify-send`)
 - `libportaudio2` — audio via `sounddevice`
 - `whisper.cpp` with CUDA, built at `/projects/ai/whisper.cpp/`
+
+## Python dependencies
+
+- `PyQt5` — system tray indicator
+- `Pillow` — tray icon generation (48×48 RGBA)
+- `pynput` — keyboard listener
+- `sounddevice` — audio capture
+- `scipy` — WAV file I/O
+- `numpy` — audio buffer manipulation
 
 ## Design docs
 
@@ -37,3 +46,4 @@ Architecture Decision Records in `docs/adr/`:
 004 — pynput+sounddevice over sxhkd+pw-record
 005 — xdotool for text input
 006 — Push-to-talk over toggle mode
+007 — VAD + incremental transcription (superseded — reverted in task 005)
