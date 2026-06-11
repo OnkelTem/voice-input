@@ -19,6 +19,7 @@ python voice_daemon.py
   - Model: `/projects/ai/whisper.cpp/models/ggml-small.bin`
 - **Language**: Auto-detect (`-l auto`).
 - **Text output**: `xdotool type` types into active window.
+- **VAD**: Энергетический детектор (RMS) прямо в callback sounddevice. При паузе > `vad_silence_ms` сегмент уходит в `queue.Queue`; фоновый поток транскрибирует инкрементально. Флаг `SPEECH_ACTIVE` предотвращает сплиты тишины после речи.
 
 ## External dependencies (system-level)
 

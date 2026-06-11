@@ -55,3 +55,21 @@ python voice_daemon.py --prompt "IT terminology: API, REST, database, deployment
 - libnotify-bin (desktop notifications)
 - libportaudio2 (audio)
 - Python 3.12+
+
+### VAD (Voice Activity Detection)
+
+```toml
+vad_threshold = 0.005
+vad_silence_ms = 2000
+vad_min_segment_ms = 300
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `vad_threshold` | `0.005` | RMS energy threshold for silence detection |
+| `vad_silence_ms` | `2000` | ms of silence before splitting a segment |
+| `vad_min_segment_ms` | `300` | minimum segment length in ms |
+
+During recording, voice activity detection (VAD) splits audio into segments on pauses
+longer than `vad_silence_ms`. Each segment is transcribed incrementally, so text appears
+in the active window progressively as you speak.
