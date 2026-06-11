@@ -12,7 +12,7 @@ python voice_daemon.py
 
 ## Architecture
 
-- **Push-to-talk**: Hold Right Shift to record, release to transcribe. A 300ms arm timer prevents accidental taps; recordings under 2 seconds are cancelled.
+- **Push-to-talk**: Hold Right Shift to record, release to transcribe. A 50ms arm timer prevents accidental taps; recordings under 2 seconds are cancelled.
 - **Audio**: `sounddevice` captures 16 kHz mono into in-memory NumPy buffer; WAV written to temp file only at transcription via `scipy.io.wavfile.write`.
 - **Transcription**: `whisper-cli` subprocess — hardcoded paths:
   - Binary: `/projects/ai/whisper.cpp/build/bin/whisper-cli`
@@ -21,6 +21,7 @@ python voice_daemon.py
 - **Text output**: `xdotool type` types into active window.
 - **Tray icon**: PyQt5 `QSystemTrayIcon` shows state (idle/recording/transcribing) with three Pillow-generated microphone icons (gray/red/blue). A `QTimer(200ms)` polls a `ctypes.c_int` shared with pynput callbacks. Context menu: Quit.
 - **Start beep**: 1000 Hz sine wave (120ms, 20% amplitude) generated with numpy, played via `paplay` before the recording stream opens.
+- **Save recordings**: When `save_recordings` is enabled in config, each audio file and its transcription text are saved to `~/.voice-input/recordings/` for later quality analysis.
 
 ## External dependencies (system-level)
 

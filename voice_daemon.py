@@ -2,6 +2,7 @@
 import argparse
 import datetime
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -54,6 +55,8 @@ def load_config(config_path: str) -> dict:
         "binary": "/projects/ai/whisper.cpp/build/bin/whisper-cli",
         "key": "insert",
         "prompt": "",
+        "save_recordings": False,
+        "recordings_dir": os.path.expanduser("~/.voice-input/recordings"),
     }
     try:
         with open(config_path, "rb") as f:
@@ -158,22 +161,23 @@ def on_press(key):
         return
     log("Key pressed")
     PRESS_TIME = time.monotonic()
-    ARM_TIMER = threading.Timer(0.3, _arm_timer)
+    ARM_TIMER = threading.Timer(0.05, _arm_timer)
     ARM_TIMER.start()
 
 
 def _arm_timer():
     global RECORDING, STREAM, ARM_TIMER, RECORD_START, AUDIO_BUFFER
     ARM_TIMER = None
-    RECORDING = True
     app_state.value = AppState.RECORDING
     AUDIO_BUFFER.clear()
-    log("Recording started")
+    log("Arm timer fired — playing start beep")
     play_start_beep()
+    time.sleep(0.02)
+    RECORDING = True
     STREAM = sd.InputStream(samplerate=FS, channels=1, callback=callback, blocksize=FRAMES_PER_BLOCK)
     STREAM.start()
     RECORD_START = time.monotonic()
-
+    log("Recording started")
 
 def on_release(key):
     global RECORDING, AUDIO_BUFFER, STREAM, ARM_TIMER, RECORD_START, PRESS_TIME
@@ -220,6 +224,19 @@ def on_release(key):
                     text += " "
                 subprocess.run(["xdotool", "type", text])
                 log(f"Transcribed: {text}")
+                if CFG.get("save_recordings", False):
+                    rec_dir = CFG["recordings_dir"]
+                    os.makedirs(rec_dir, exist_ok=True)
+                    ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    duration = len(data) / FS
+                    stem = f"{ts}_{duration:.1f}s"
+                    wav_path = os.path.join(rec_dir, stem + ".wav")
+                    txt_path = os.path.join(rec_dir, stem + ".txt")
+                    shutil.copy2(tmp, wav_path)
+                    log(f"Recording saved: {wav_path}")
+                    with open(txt_path, "w") as tf:
+                        tf.write(text + "\n")
+                    log(f"Transcript saved: {txt_path}")
             else:
                 log("No speech detected")
         except Exception as e:
@@ -296,6 +313,10 @@ def main():
         log("Config loaded, no prompt")
     log(f"Model: {CFG['model']}")
     log(f"Binary: {CFG['binary']}")
+    if CFG.get("save_recordings", False):
+        log(f"Save recordings: enabled → {CFG['recordings_dir']}")
+    else:
+        log("Save recordings: disabled")
     log(f"Mode: {CFG['mode']}")
     log(f"Ready. Hold {CFG['key'].name} to record")
     TrayApp(CFG).run()
