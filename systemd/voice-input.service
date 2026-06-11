@@ -1,0 +1,14 @@
+[Unit]
+Description=Voice Input Daemon — offline AI dictation
+After=sound.target graphical-session.target
+Requires=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/projects/ai/voice-input/.venv/bin/python /projects/ai/voice-input/voice_daemon.py
+WorkingDirectory=/projects/ai/voice-input
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target
