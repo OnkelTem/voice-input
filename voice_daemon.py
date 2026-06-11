@@ -196,6 +196,9 @@ def on_release(key):
         SEGMENT_BUFFER.clear()
         SILENCE_FRAMES = 0
         SPEECH_ACTIVE = False
+        SEGMENT_QUEUE.put(None)
+        if TRANSCRIBER_THREAD:
+            TRANSCRIBER_THREAD.join()
         return
     if SEGMENT_BUFFER and SPEECH_ACTIVE:
         data = np.concatenate(SEGMENT_BUFFER)
