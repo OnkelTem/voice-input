@@ -49,10 +49,13 @@ def log(msg: str) -> None:
 
 
 def load_config(config_path: str) -> dict:
+    binary_default = shutil.which("whisper-cli") or "/projects/ai/whisper.cpp/build/bin/whisper-cli"
+    model_derived = os.path.join(os.path.dirname(binary_default), "../models/ggml-small.bin")
+    model_default = model_derived if os.path.exists(model_derived) else "/projects/ai/whisper.cpp/models/ggml-small.bin"
     defaults = {
         "mode": "push-to-talk",
-        "model": "/projects/ai/whisper.cpp/models/ggml-small.bin",
-        "binary": "/projects/ai/whisper.cpp/build/bin/whisper-cli",
+        "model": model_default,
+        "binary": binary_default,
         "key": "insert",
         "prompt": "",
         "save_recordings": False,
@@ -304,8 +307,38 @@ class TrayApp:
         sys.exit(self.app.exec())
 
 
+DEFAULT_CONFIG_TOML = """# Voice Input configuration
+# Uncomment and modify values as needed.
+
+# Transcription context prompt
+# prompt = ""
+
+# Path to whisper-cli binary
+# binary = ""
+
+# Path to whisper model file
+# model = ""
+
+# Hotkey: shift_r, insert, f1, f2, space, etc.
+# key = "insert"
+
+# Operating mode: "push-to-talk" or "toggle"
+# mode = "push-to-talk"
+
+# Save recordings for quality analysis
+# save_recordings = false
+
+# Recordings directory (only used if save_recordings = true)
+# recordings_dir = "~/.voice-input/recordings"
+"""
+
 def main():
     global CFG
+    os.makedirs(os.path.expanduser("~/.config/voice-input"), exist_ok=True)
+    config_path = os.path.expanduser("~/.config/voice-input/config.toml")
+    if not os.path.exists(config_path):
+        with open(config_path, "w") as f:
+            f.write(DEFAULT_CONFIG_TOML)
     CFG = build_config()
     if CFG["prompt"]:
         log(f"Config loaded, prompt={CFG['prompt'][:80]!r}")
@@ -314,6 +347,7 @@ def main():
     log(f"Model: {CFG['model']}")
     log(f"Binary: {CFG['binary']}")
     if CFG.get("save_recordings", False):
+        os.makedirs(CFG["recordings_dir"], exist_ok=True)
         log(f"Save recordings: enabled → {CFG['recordings_dir']}")
     else:
         log("Save recordings: disabled")

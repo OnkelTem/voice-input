@@ -4,58 +4,70 @@ Offline AI voice dictation daemon for Linux with system tray indicator. Uses whi
 
 ## Setup
 
+### Системные зависимости
+
+```bash
+sudo apt install xdotool libportaudio2 portaudio19-dev
+```
+
+Установите whisper-cli в систему:
+
+```bash
+cmake --install /projects/ai/whisper.cpp/build
+```
+
+### Установка voice-input
+
 ```bash
 cd /projects/ai/voice-input
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
+./install.sh
+```
+
+### Удаление
+
+```bash
+cd /projects/ai/voice-input
+./uninstall.sh
 ```
 
 ## Usage
 
+После установки команда `voice-input` доступна глобально. Просто запустите:
+
 ```bash
-source .venv/bin/activate
-python voice_daemon.py
+voice-input
 ```
 
-Press and hold **Right Shift** to record (300ms arm delay prevents accidental taps), release to transcribe.
+Или через systemd-сервис (автоматически включён install.sh):
+
+```bash
+systemctl --user status voice-input
+```
+
+Press and hold **Right Shift** (по умолчанию, настраивается в конфиге) to record,
+release to transcribe.
 
 ## Configuration
 
-Config file at `~/.config/voice-input/config.toml` (all fields optional):
-
-```toml
-prompt = "медицинская диктовка: анамнез, диагноз, терапия"
-model = "/projects/ai/whisper.cpp/models/ggml-small.bin"
-binary = "/projects/ai/whisper.cpp/build/bin/whisper-cli"
-key = "shift_r"
-mode = "push-to-talk"
-```
+Config file at `~/.config/voice-input/config.toml`. Если файла нет — он создаётся
+автоматически при первом запуске со всеми полями, закомментированными и с пояснениями.
 
 CLI flags override config file values:
 
 | Flag | Default | Description |
 |---|---|---|
 | `--config PATH` | `~/.config/voice-input/config.toml` | Config file path |
-| `--model PATH` | `ggml-small.bin` | Whisper model path |
-| `--binary PATH` | `whisper-cli` | Whisper binary path |
+| `--model PATH` | auto (ищет рядом с whisper-cli) | Whisper model path |
+| `--binary PATH` | auto (ищет в $PATH) | Whisper binary path |
 | `--prompt TEXT` | `""` | Initial prompt for transcription context |
-| `--key NAME` | `shift_r` | Hotkey (insert, f1, f2, space, etc.) |
+| `--key NAME` | `insert` | Hotkey (shift_r, insert, f1, f2, space, etc.) |
 | `--mode NAME` | `push-to-talk` | Operating mode (push-to-talk or toggle) |
-
-Example with prompt:
-```bash
-python voice_daemon.py --prompt "IT terminology: API, REST, database, deployment"
-```
-
-During recording audio accumulates; transcription runs as a single block when the key is released.
-A short beep plays when recording begins.
 
 ## Requirements
 
-- whisper.cpp with CUDA at `/projects/ai/whisper.cpp/`
-- xdotool (text injection via XTEST)
-- libportaudio2 (audio)
+- `whisper-cli` (из whisper.cpp) в $PATH
+- `xdotool` — text injection
+- `libportaudio2` — audio
 - Python 3.12+
 - PyQt5 — system tray indicator
 - Pillow — tray icon generation

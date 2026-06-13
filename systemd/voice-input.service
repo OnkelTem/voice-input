@@ -5,8 +5,7 @@ Requires=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/projects/ai/voice-input/.venv/bin/python /projects/ai/voice-input/voice_daemon.py
-WorkingDirectory=/projects/ai/voice-input
+ExecStart=%h/.local/bin/voice-input
 Restart=on-failure
 RestartSec=3
 
