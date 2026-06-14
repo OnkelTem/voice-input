@@ -15,7 +15,7 @@ press-stop), which is less fluid for dictation. Push-to-talk maps naturally
 to the metaphor of "holding a push-to-talk button."
 
 Two practical concerns were addressed:
-1. **Accidental taps** — a 300ms arming timer prevents recording on quick
+1. **Accidental taps** — a 50ms arming timer prevents recording on quick
    inadvertent presses. If the key is released before the timer fires, no
    recording starts.
 2. **Very short recordings** — if the recording lasts less than 2 seconds,
@@ -28,7 +28,7 @@ The code structure supports a future `mode = "toggle"` option.
 ## Consequences
 - **Positive:** More intuitive — hold to record, release to transcribe
 - **Positive:** Single-action recording; no second press needed
-- **Positive:** 300ms arm timer filters out accidental taps
+- **Positive:** 50ms arm timer filters out accidental taps
 - **Positive:** 2-second minimum prevents wasted transcription on short bursts
 - **Negative:** Requires holding the key for the entire recording duration
 - **Negative:** Slightly more complex state machine (IDLE → ARMING → RECORDING)

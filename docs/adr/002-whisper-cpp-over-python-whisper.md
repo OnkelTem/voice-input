@@ -1,5 +1,7 @@
 # ADR 002: whisper.cpp over Python whisper implementations
 
+Superseded by ADR 008 (in-process whisper.cpp via cffi)
+
 ## Status
 Accepted
 

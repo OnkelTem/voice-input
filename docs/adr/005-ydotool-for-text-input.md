@@ -1,5 +1,7 @@
 # ADR 005: ydotool for text input
 
+Superseded — actual implementation uses `xdotool` (see ADR 004)
+
 ## Status
 Accepted
 

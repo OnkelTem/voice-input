@@ -14,6 +14,6 @@ Replace with Python-native libraries:
 ## Consequences
 - **Positive:** Single process, no IPC, no cleanup logic for stale processes
 - **Positive:** Audio buffer lives entirely in RAM; WAV file written only once at the end
-- **Positive:** No dependency on PipeWire/PulseAudio CLI tools
+- **Positive:** Minimal dependency on PulseAudio CLI tools (only `paplay` for start beep)
 - **Negative:** `pynput` may require `python3-xlib` or similar on some X11 setups
 - **Negative:** `sounddevice` uses PortAudio internally — may need `libportaudio2` installed

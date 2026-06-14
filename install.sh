@@ -6,10 +6,9 @@ SYSTEMD_DIR="$HOME/.config/systemd/user"
 SERVICE_SRC="$SCRIPT_DIR/systemd/voice-input.service"
 
 # Check dependencies
-for cmd in python3 xdotool whisper-cli; do
+for cmd in python3 xdotool; do
   if ! command -v "$cmd" &>/dev/null; then
     echo "ERROR: $cmd not found. Install it first."
-    echo "  whisper-cli: cmake --install /projects/ai/whisper.cpp/build"
     echo "  xdotool: sudo apt install xdotool"
     exit 1
   fi

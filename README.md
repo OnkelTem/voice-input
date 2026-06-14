@@ -10,11 +10,7 @@ Offline AI voice dictation daemon for Linux with system tray indicator. Uses whi
 sudo apt install xdotool libportaudio2 portaudio19-dev
 ```
 
-Установите whisper-cli в систему:
-
-```bash
-cmake --install /projects/ai/whisper.cpp/build
-```
+Убедитесь, что модель whisper.cpp (.bin файл) доступна.
 
 ### Установка voice-input
 
@@ -44,7 +40,7 @@ voice-input
 systemctl --user status voice-input
 ```
 
-Press and hold **Right Shift** (по умолчанию, настраивается в конфиге) to record,
+Press and hold **INSERT** (по умолчанию, настраивается в конфиге) to record,
 release to transcribe.
 
 ## Configuration
@@ -57,17 +53,18 @@ CLI flags override config file values:
 | Flag | Default | Description |
 |---|---|---|
 | `--config PATH` | `~/.config/voice-input/config.toml` | Config file path |
-| `--model PATH` | auto (ищет рядом с whisper-cli) | Whisper model path |
-| `--binary PATH` | auto (ищет в $PATH) | Whisper binary path |
-| `--prompt TEXT` | `""` | Initial prompt for transcription context |
+| `--model PATH` | `/projects/ai/whisper.cpp/models/ggml-small.bin` | Whisper model path |
 | `--key NAME` | `insert` | Hotkey (shift_r, insert, f1, f2, space, etc.) |
 | `--mode NAME` | `push-to-talk` | Operating mode (push-to-talk or toggle) |
 
 ## Requirements
 
-- `whisper-cli` (из whisper.cpp) в $PATH
 - `xdotool` — text injection
 - `libportaudio2` — audio
+- `paplay` (pulseaudio-utils) — звук старта
 - Python 3.12+
 - PyQt5 — system tray indicator
 - Pillow — tray icon generation
+- cffi — обёртка для whisper.cpp (whisper_helper.so)
+- `python-xlib` — X11 key state polling
+- `scipy` — WAV file I/O

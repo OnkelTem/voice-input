@@ -2,24 +2,27 @@
 import argparse
 import datetime
 import os
-import shutil
 import subprocess
 import sys
+import signal
 import tempfile
+import scipy.io.wavfile as wav
 import threading
 import time
 import tomllib
 from enum import IntEnum
 import ctypes
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QObject, pyqtSignal
 from PyQt5.QtGui import QIcon, QPixmap, QImage
 from PIL import Image, ImageDraw
 
 import numpy as np
 import pynput.keyboard as kb
-import scipy.io.wavfile as wav
 import sounddevice as sd
+from Xlib import display as xdisp
+
+from whisper_model import WhisperModel
 
 FS = 16000
 RECORDING = False
@@ -29,7 +32,10 @@ PRESS_TIME = 0.0
 RECORD_START = 0.0
 ARM_TIMER = None
 CFG = {}
+WHISPER_MODEL: WhisperModel | None = None
 LISTENER = None
+POLL_THREAD = None
+STOP_POLL = False
 
 FRAMES_PER_BLOCK = 512
 
@@ -40,7 +46,7 @@ class AppState(IntEnum):
     TRANSCRIBING = 2
 
 
-app_state = ctypes.c_int(0)
+TRAY_APP = None
 
 
 def log(msg: str) -> None:
@@ -49,17 +55,13 @@ def log(msg: str) -> None:
 
 
 def load_config(config_path: str) -> dict:
-    binary_default = shutil.which("whisper-cli") or "/projects/ai/whisper.cpp/build/bin/whisper-cli"
-    model_derived = os.path.join(os.path.dirname(binary_default), "../models/ggml-small.bin")
-    model_default = model_derived if os.path.exists(model_derived) else "/projects/ai/whisper.cpp/models/ggml-small.bin"
     defaults = {
         "mode": "push-to-talk",
-        "model": model_default,
-        "binary": binary_default,
+        "model": "/projects/ai/whisper.cpp/models/ggml-small.bin",
         "key": "insert",
-        "prompt": "",
         "save_recordings": False,
         "recordings_dir": os.path.expanduser("~/.voice-input/recordings"),
+        "whisper": {},
     }
     try:
         with open(config_path, "rb") as f:
@@ -67,6 +69,8 @@ def load_config(config_path: str) -> dict:
         for k in defaults:
             if k in data:
                 defaults[k] = data[k]
+        if "whisper" in data:
+            defaults["whisper"] = data["whisper"]
     except (FileNotFoundError, tomllib.TOMLDecodeError):
         pass
     return defaults
@@ -74,9 +78,7 @@ def load_config(config_path: str) -> dict:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Voice input daemon")
-    parser.add_argument("--prompt", type=str, default=None, help="Initial prompt text")
     parser.add_argument("--model", type=str, default=None, help="Model path")
-    parser.add_argument("--binary", type=str, default=None, help="Whisper binary path")
     parser.add_argument("--key", type=str, default=None, help="Toggle key name")
     parser.add_argument("--mode", type=str, default=None, help="Operating mode (push-to-talk or toggle)")
     parser.add_argument("--config", type=str, default=None, help="Config file path")
@@ -87,7 +89,7 @@ def build_config() -> dict:
     args = parse_args()
     config_path = args.config or os.path.expanduser("~/.config/voice-input/config.toml")
     cfg = load_config(config_path)
-    for k in ("prompt", "model", "binary", "key", "mode"):
+    for k in ("model", "key", "mode"):
         v = getattr(args, k, None)
         if v is not None:
             cfg[k] = v
@@ -154,9 +156,18 @@ def callback(indata, frames, time, status):
     AUDIO_BUFFER.append(indata.copy())
 
 
+def _key_matches(event_key, target):
+    if event_key == target:
+        return True
+    try:
+        return event_key.vk == target.value.vk
+    except (AttributeError, TypeError):
+        return False
+
+
 def on_press(key):
     global RECORDING, ARM_TIMER, PRESS_TIME
-    if key != CFG["key"]:
+    if not _key_matches(key, CFG["key"]):
         return
     if CFG["mode"] != "push-to-talk":
         return
@@ -171,20 +182,20 @@ def on_press(key):
 def _arm_timer():
     global RECORDING, STREAM, ARM_TIMER, RECORD_START, AUDIO_BUFFER
     ARM_TIMER = None
-    app_state.value = AppState.RECORDING
+    TRAY_APP.set_state(AppState.RECORDING)
     AUDIO_BUFFER.clear()
-    log("Arm timer fired — playing start beep")
+    log("Arm timer fired \u2014 playing start beep")
     play_start_beep()
     time.sleep(0.02)
     RECORDING = True
-    STREAM = sd.InputStream(samplerate=FS, channels=1, callback=callback, blocksize=FRAMES_PER_BLOCK)
+    STREAM = sd.InputStream(samplerate=FS, channels=1, callback=callback, blocksize=FRAMES_PER_BLOCK, dtype=np.int16)
     STREAM.start()
     RECORD_START = time.monotonic()
     log("Recording started")
 
 def on_release(key):
     global RECORDING, AUDIO_BUFFER, STREAM, ARM_TIMER, RECORD_START, PRESS_TIME
-    if key != CFG["key"]:
+    if not _key_matches(key, CFG["key"]):
         return
     if CFG["mode"] != "push-to-talk":
         return
@@ -201,57 +212,92 @@ def on_release(key):
         STREAM.close()
         STREAM = None
     log("Key released")
+    _stop_stream_and_transcribe()
+
+
+def _stop_stream_and_transcribe():
+    global AUDIO_BUFFER, STREAM, RECORD_START, PRESS_TIME
+    if STREAM:
+        STREAM.stop()
+        STREAM.close()
+        STREAM = None
+    log("Stream stopped for transcription")
     elapsed = time.monotonic() - PRESS_TIME
     if elapsed < 2.0:
         log("Recording cancelled (too short)")
         AUDIO_BUFFER.clear()
-        app_state.value = AppState.IDLE
+        TRAY_APP.set_state(AppState.IDLE)
         return
-    app_state.value = AppState.TRANSCRIBING
+    TRAY_APP.set_state(AppState.TRANSCRIBING)
     if AUDIO_BUFFER:
         data = np.concatenate(AUDIO_BUFFER)
         AUDIO_BUFFER.clear()
         log(f"Transcribing ({len(data)/FS:.1f}s)...")
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            tmp = f.name
-            wav.write(tmp, FS, data)
-        try:
-            args = [CFG["binary"], "-m", CFG["model"], "-f", tmp, "--no-timestamps"]
-            if CFG["prompt"]:
-                args += ["--prompt", CFG["prompt"]]
-            args += ["-l", "auto"]
-            result = subprocess.run(args, capture_output=True, text=True, timeout=30)
-            text = result.stdout.strip()
-            if text:
-                if text[-1] in ".?!":
-                    text += " "
-                subprocess.run(["xdotool", "type", text])
-                log(f"Transcribed: {text}")
-                if CFG.get("save_recordings", False):
-                    rec_dir = CFG["recordings_dir"]
-                    os.makedirs(rec_dir, exist_ok=True)
-                    ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                    duration = len(data) / FS
-                    stem = f"{ts}_{duration:.1f}s"
-                    wav_path = os.path.join(rec_dir, stem + ".wav")
-                    txt_path = os.path.join(rec_dir, stem + ".txt")
-                    shutil.copy2(tmp, wav_path)
-                    log(f"Recording saved: {wav_path}")
-                    with open(txt_path, "w") as tf:
-                        tf.write(text + "\n")
-                    log(f"Transcript saved: {txt_path}")
-            else:
-                log("No speech detected")
-        except Exception as e:
-            log(f"Transcription error: {e}")
-        finally:
-            os.unlink(tmp)
-    app_state.value = AppState.IDLE
+        stem = None
+        if CFG.get("save_recordings", False):
+            rec_dir = CFG["recordings_dir"]
+            os.makedirs(rec_dir, exist_ok=True)
+            ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            duration = len(data) / FS
+            stem = f"{ts}_{duration:.1f}s"
+            wav_path = os.path.join(rec_dir, stem + ".wav")
+            wav.write(wav_path, FS, data)
+            log(f"Recording saved: {wav_path}")
+        text = ""
+        if WHISPER_MODEL is not None:
+            try:
+                text = WHISPER_MODEL.transcribe(data)
+            except Exception as e:
+                log(f"Transcription error: {e}")
+        if text:
+            if text[-1] in ".?!":
+                text += " "
+            subprocess.run(["xdotool", "type", text])
+            log(f"Transcribed: {text}")
+            if CFG.get("save_recordings", False) and stem:
+                txt_path = os.path.join(rec_dir, stem + ".txt")
+                with open(txt_path, "w") as tf:
+                    tf.write(text + "\n")
+                log(f"Transcript saved: {txt_path}")
+        else:
+            log("No speech detected")
+    TRAY_APP.set_state(AppState.IDLE)
     log("Transcription complete")
 
 
-class TrayApp:
+def _x11_poll_worker():
+    global RECORDING
+    try:
+        dpy = xdisp.Display()
+        target_vk = CFG["key"].value.vk
+        keycode = dpy.keysym_to_keycode(target_vk)
+        if keycode == 0:
+            log("Poll worker: could not resolve X11 keycode, disabling")
+            dpy.close()
+            return
+        log(f"Poll worker started, tracking keycode={keycode} (vk={hex(target_vk)})")
+        while not STOP_POLL:
+            if RECORDING:
+                data = dpy.query_keymap()
+                bit_down = bool(data[keycode // 8] & (1 << (keycode % 8)))
+                if not bit_down:
+                    log("Poll worker: key release detected")
+                    RECORDING = False
+                    _stop_stream_and_transcribe()
+            time.sleep(0.05)
+        dpy.close()
+        log("Poll worker stopped")
+    except Exception as e:
+        log(f"Poll worker error: {e}")
+
+
+class TrayApp(QObject):
+    state_changed = pyqtSignal(int)
+
     def __init__(self, cfg):
+        super().__init__()
+        global TRAY_APP
+        TRAY_APP = self
         self.cfg = cfg
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
@@ -269,16 +315,14 @@ class TrayApp:
         menu.addAction(quit_action)
         self.tray.setContextMenu(menu)
 
-        self.timer = QTimer()
-        self.timer.timeout.connect(self.update_icon)
-        self.timer.start(200)
-        self._prev_state = AppState.IDLE
+        self.state_changed.connect(self._on_state_changed)
 
-    def update_icon(self):
-        state = AppState(app_state.value)
-        if state != self._prev_state:
-            self.tray.setIcon(self.icons[state])
-            self._prev_state = state
+    def set_state(self, state: AppState):
+        self.state_changed.emit(state.value)
+
+    def _on_state_changed(self, state_val: int):
+        state = AppState(state_val)
+        self.tray.setIcon(self.icons[state])
         tips = {
             AppState.IDLE: "Voice Input \u2014 Idle",
             AppState.RECORDING: "Voice Input \u2014 Recording...",
@@ -287,7 +331,8 @@ class TrayApp:
         self.tray.setToolTip(tips[state])
 
     def quit(self):
-        global RECORDING, STREAM, LISTENER
+        global RECORDING, STREAM, LISTENER, STOP_POLL, POLL_THREAD
+        STOP_POLL = True
         if LISTENER:
             LISTENER.stop()
         if RECORDING:
@@ -299,61 +344,126 @@ class TrayApp:
         self.app.quit()
 
     def run(self):
-        global LISTENER
+        global LISTENER, STOP_POLL, POLL_THREAD
         LISTENER = kb.Listener(on_press=on_press, on_release=on_release)
         LISTENER.daemon = True
         LISTENER.start()
-        self.timer.start()
-        sys.exit(self.app.exec())
+        STOP_POLL = False
+        POLL_THREAD = threading.Thread(target=_x11_poll_worker, daemon=True)
+        POLL_THREAD.start()
+        return self.app.exec()
 
 
 DEFAULT_CONFIG_TOML = """# Voice Input configuration
 # Uncomment and modify values as needed.
 
-# Transcription context prompt
-# prompt = ""
+# Path to whisper model file (.bin)
+# model = "/projects/ai/whisper.cpp/models/ggml-small.bin"
 
-# Path to whisper-cli binary
-# binary = ""
-
-# Path to whisper model file
-# model = ""
-
-# Hotkey: shift_r, insert, f1, f2, space, etc.
+# Hotkey key name: shift_r, insert, f1, f2, space, etc.
 # key = "insert"
 
 # Operating mode: "push-to-talk" or "toggle"
 # mode = "push-to-talk"
 
-# Save recordings for quality analysis
+# Save recordings for quality analysis (saves WAV + transcript to recordings_dir)
 # save_recordings = false
 
-# Recordings directory (only used if save_recordings = true)
+# Directory for saved recordings (only used if save_recordings = true)
 # recordings_dir = "~/.voice-input/recordings"
+
+[whisper]
+# Number of threads to use during computation
+# n_threads = 4
+
+# Maximum number of text context tokens to accumulate across calls (0 = disable context)
+# n_max_text_ctx = 224
+
+# Spoken language: "auto" for auto-detect, or language code like "en", "ru", "de"
+# language = "auto"
+
+# Sampling temperature (0.0 = greedy, up to 1.0)
+# temperature = 0.0
+
+# Temperature increment for fallback on greedy failure (0 = no fallback)
+# temperature_inc = 0.2
+
+# Suppress non-speech tokens
+# suppress_nst = false
+
+# Do not use past transcription as context for the decoder
+# no_context = false
+
+# Translate from source language to English
+# translate = false
+
+# Force single segment output
+# single_segment = false
+
+# Maximum segment length in characters (0 = no limit)
+# max_len = 0
+
+# Split on word boundaries rather than on token boundaries
+# split_on_word = false
+
+# Suppress blank output at the beginning of transcription
+# suppress_blank = true
+
+# Do not generate timestamps
+# no_timestamps = true
+
+# Initial prompt for transcription context (max n_text_ctx / 2 tokens)
+# initial_prompt = ""
+
+# Always prepend initial_prompt to the start of every decode window
+# carry_initial_prompt = false
+
+# Regular expression matching tokens to suppress
+# suppress_regex = ""
+
+# Enable built-in Voice Activity Detection in whisper.cpp
+# vad = false
+
+# Print special tokens (e.g., [SOT], [EOT], [BLANK])
+# print_special = false
+
+# Enable debug mode
+# debug_mode = false
 """
 
 def main():
-    global CFG
+    global CFG, WHISPER_MODEL
     os.makedirs(os.path.expanduser("~/.config/voice-input"), exist_ok=True)
     config_path = os.path.expanduser("~/.config/voice-input/config.toml")
     if not os.path.exists(config_path):
         with open(config_path, "w") as f:
             f.write(DEFAULT_CONFIG_TOML)
     CFG = build_config()
-    if CFG["prompt"]:
-        log(f"Config loaded, prompt={CFG['prompt'][:80]!r}")
-    else:
-        log("Config loaded, no prompt")
-    log(f"Model: {CFG['model']}")
-    log(f"Binary: {CFG['binary']}")
+    try:
+        WHISPER_MODEL = WhisperModel(
+            CFG["model"],
+            log_fn=log,
+            overrides=CFG.get("whisper", {}),
+        )
+        log(f"Whisper model loaded: {CFG['model']}")
+    except Exception as e:
+        log(f"Failed to load whisper model: {e}")
+        sys.exit(1)
     if CFG.get("save_recordings", False):
         os.makedirs(CFG["recordings_dir"], exist_ok=True)
-        log(f"Save recordings: enabled → {CFG['recordings_dir']}")
+        log(f"Save recordings: enabled \u2192 {CFG['recordings_dir']}")
     else:
         log("Save recordings: disabled")
     log(f"Mode: {CFG['mode']}")
     log(f"Ready. Hold {CFG['key'].name} to record")
-    TrayApp(CFG).run()
+    signal.signal(signal.SIGINT, signal.SIG_DFL)
+    try:
+        exit_code = TrayApp(CFG).run()
+    finally:
+        if WHISPER_MODEL is not None:
+            WHISPER_MODEL.free()
+            WHISPER_MODEL = None
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":

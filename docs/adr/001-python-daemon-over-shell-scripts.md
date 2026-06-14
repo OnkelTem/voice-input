@@ -1,5 +1,7 @@
 # ADR 001: Python daemon over shell scripts
 
+Superseded by ADR 004 (xdotool) and ADR 008 (in-process whisper.cpp via cffi)
+
 ## Status
 Accepted
 
