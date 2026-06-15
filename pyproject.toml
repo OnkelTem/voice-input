@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 voice-input = "voice_input.voice_daemon:main"
+voice-transcribe = "voice_input.transcribe:main"
 
 [tool.setuptools.packages.find]
 include = ["voice_input*"]

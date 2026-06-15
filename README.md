@@ -44,9 +44,11 @@ systemctl --user status voice-input
 
 ```bash
 cd /projects/ai/voice-input
-make
+python3 -m venv .venv
 source .venv/bin/activate
-python -m voice_input.voice_daemon
+pip install -e .
+make
+voice-input
 ```
 
 Press and hold **INSERT** (по умолчанию, настраивается в конфиге) to record,

@@ -8,7 +8,6 @@ import signal
 import scipy.io.wavfile as wav
 import threading
 import time
-import tomllib
 from enum import IntEnum
 import ctypes
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
@@ -21,6 +20,7 @@ import pynput.keyboard as kb
 import sounddevice as sd
 from Xlib import display as xdisp
 
+from voice_input.config import load_config
 from voice_input.whisper_model import WhisperModel
 
 FS = 16000
@@ -51,28 +51,6 @@ TRAY_APP = None
 def log(msg: str) -> None:
     ts = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     print(f"[{ts}] [voice-input] {msg}", flush=True)
-
-
-def load_config(config_path: str) -> dict:
-    defaults = {
-        "mode": "push-to-talk",
-        "model": "/projects/ai/whisper.cpp/models/ggml-small.bin",
-        "key": "insert",
-        "save_recordings": False,
-        "recordings_dir": os.path.expanduser("~/.voice-input/recordings"),
-        "whisper": {},
-    }
-    try:
-        with open(config_path, "rb") as f:
-            data = tomllib.load(f)
-        for k in defaults:
-            if k in data:
-                defaults[k] = data[k]
-        if "whisper" in data:
-            defaults["whisper"] = data["whisper"]
-    except (FileNotFoundError, tomllib.TOMLDecodeError):
-        pass
-    return defaults
 
 
 def parse_args() -> argparse.Namespace:
