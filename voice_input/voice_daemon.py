@@ -140,7 +140,7 @@ def _arm_timer():
     _play_start_beep()
     time.sleep(0.02)
     RECORDING = True
-    STREAM = sd.InputStream(samplerate=FS, channels=1, callback=callback, blocksize=FRAMES_PER_BLOCK, dtype=np.int16)
+    STREAM = sd.InputStream(samplerate=FS, channels=1, callback=callback, blocksize=FRAMES_PER_BLOCK)
     STREAM.start()
     RECORD_START = time.monotonic()
     log("Recording started")
