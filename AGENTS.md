@@ -1,6 +1,6 @@
 # Voice Input
 
-Single Python daemon (`voice_daemon.py`) for offline AI voice dictation on Linux.
+Python package (`voice_input/`) for offline AI voice dictation on Linux.
 
 ## Quick start
 
@@ -8,7 +8,7 @@ Single Python daemon (`voice_daemon.py`) for offline AI voice dictation on Linux
 cd /projects/ai/voice-input
 make
 source .venv/bin/activate
-python voice_daemon.py
+python -m voice_input.voice_daemon
 ```
 
 ## Architecture
@@ -18,10 +18,11 @@ python voice_daemon.py
 - **Transcription**: In-process whisper.cpp via cffi (`whisper_model.py`). Loads `libwhisper.so.1` through a thin C helper (`whisper_helper.c` → `whisper_helper.so`) that accepts `whisper_full_params*` by pointer, avoiding cffi struct-by-value ABI mismatches. `whisper_full_default_params_by_ref()` provides a properly laid-out heap struct. Model loads once at startup, context accumulates via `n_max_text_ctx`. `WhisperModel.transcribe()` takes numpy array directly and normalises int16 → float32.
 - **Language**: Auto-detect.
 - **Text output**: `xdotool type` types into active window.
-- **Tray icon**: PyQt5 `QSystemTrayIcon` shows state (idle/recording/transcribing) with three Pillow-generated microphone icons (gray/red/blue). A `QTimer(200ms)` polls a `ctypes.c_int` shared with pynput callbacks. Context menu: Quit.
-- **Start beep**: 1000 Hz sine wave (120ms, 20% amplitude) generated with numpy, played via `paplay` before the recording stream opens.
+- **Tray icon**: PyQt5 `QSystemTrayIcon` shows state (idle/recording/transcribing) with three SVG icons (gray/red/blue) loaded from `voice_input/static/`. Context menu: Quit.
+- **Start beep**: 1000 Hz sine wave (120ms, 20% amplitude) WAV file loaded from `voice_input/static/`, played via `paplay` before the recording stream opens.
 - **Save recordings**: When `save_recordings` is enabled in config, each audio file and its transcription text are saved to `~/.voice-input/recordings/` for later quality analysis.
-- **Конфигурация**: секция `[whisper]` в `config.toml` позволяет настраивать параметры whisper.cpp (температура, язык, VAD и т.д.).
+- **Конфигурация**: секция `[whisper]` в `config.toml` позволяет настраивать параметры whisper.cpp (температура, язык, VAD и т.д.). Дефолтный конфиг — `voice_input/templates/config.toml`, копируется в `~/.config/voice-input/` при первом запуске.
+- **Static assets**: Иконки (SVG) и звук (WAV) генерируются скриптами из `scripts/` через `make static`. Не требуют Pillow или NumPy для генерации.
 
 ## External dependencies (system-level)
 
@@ -33,7 +34,6 @@ python voice_daemon.py
 ## Python dependencies
 
 - `PyQt5` — system tray indicator
-- `Pillow` — tray icon generation (48×48 RGBA)
 - `pynput` — keyboard listener
 - `sounddevice` — audio capture
 - `scipy` — WAV file I/O

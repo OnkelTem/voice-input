@@ -13,10 +13,15 @@ dependencies = [
     "scipy>=1.14.0",
     "numpy>=2.0.0",
     "PyQt5>=5.15",
-    "Pillow>=10.2",
     "cffi>=1.16.0",
     "python-xlib>=0.33",
 ]
 
 [project.scripts]
-voice-input = "voice_daemon:main"
+voice-input = "voice_input.voice_daemon:main"
+
+[tool.setuptools.packages.find]
+include = ["voice_input*"]
+
+[tool.setuptools.package-data]
+voice_input = ["static/*", "templates/*", "whisper_helper.so"]

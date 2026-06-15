@@ -5,7 +5,6 @@ import os
 import subprocess
 import sys
 import signal
-import tempfile
 import scipy.io.wavfile as wav
 import threading
 import time
@@ -14,15 +13,15 @@ from enum import IntEnum
 import ctypes
 from PyQt5.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QAction
 from PyQt5.QtCore import QObject, pyqtSignal
-from PyQt5.QtGui import QIcon, QPixmap, QImage
-from PIL import Image, ImageDraw
+from PyQt5.QtGui import QIcon
+from importlib.resources import files as _pkg_files
 
 import numpy as np
 import pynput.keyboard as kb
 import sounddevice as sd
 from Xlib import display as xdisp
 
-from whisper_model import WhisperModel
+from voice_input.whisper_model import WhisperModel
 
 FS = 16000
 RECORDING = False
@@ -97,56 +96,9 @@ def build_config() -> dict:
     return cfg
 
 
-def _generate_tone(freq: float, duration_ms: int = 80, fs: int = 22050) -> np.ndarray:
-    n = int(fs * duration_ms / 1000)
-    t = np.arange(n) / fs
-    tone = np.sin(2 * np.pi * freq * t)
-    fade = int(fs * 0.005)
-    tone[:fade] *= np.linspace(0, 1, fade)
-    tone[-fade:] *= np.linspace(1, 0, fade)
-    return (tone * 0.2).astype(np.float32)
-
-
-def _play_tone(tone: np.ndarray, fs: int = 22050) -> None:
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-        tmp = f.name
-        wav.write(tmp, fs, tone)
-    try:
-        subprocess.run(["paplay", tmp], capture_output=True)
-    finally:
-        os.unlink(tmp)
-
-
-def play_start_beep():
-    _play_tone(_generate_tone(1000, 120))
-
-
-def generate_icons() -> dict[AppState, QIcon]:
-    def _draw_mic(draw, color):
-        draw.rounded_rectangle([(17, 8), (31, 28)], radius=4, fill=color)
-        for y in (14, 18, 22):
-            draw.line([(19, y), (29, y)], fill=(255, 255, 255, 128), width=1)
-        draw.rectangle([(22, 28), (26, 36)], fill=color)
-        draw.rectangle([(16, 35), (32, 37)], fill=color)
-
-    icons = {}
-    for state, color, overlay in (
-        (AppState.IDLE, "#888888", None),
-        (AppState.RECORDING, "#E53935", (38, 38, 5, "#E53935")),
-        (AppState.TRANSCRIBING, "#1976D2", None),
-    ):
-        img = Image.new("RGBA", (48, 48), (0, 0, 0, 0))
-        draw = ImageDraw.Draw(img)
-        _draw_mic(draw, color)
-        if state == AppState.RECORDING:
-            draw.ellipse([(33, 33), (43, 43)], fill="#E53935")
-        elif state == AppState.TRANSCRIBING:
-            for cx in (34, 37, 40):
-                draw.ellipse([(cx - 2, 36), (cx + 2, 40)], fill="#1976D2")
-        qimage = QImage(img.tobytes(), 48, 48, QImage.Format_RGBA8888)
-        pix = QPixmap.fromImage(qimage)
-        icons[state] = QIcon(pix)
-    return icons
+def _play_start_beep():
+    beep_path = _pkg_files("voice_input") / "static" / "beep.wav"
+    subprocess.run(["paplay", str(beep_path)], capture_output=True)
 
 
 def callback(indata, frames, time, status):
@@ -185,7 +137,7 @@ def _arm_timer():
     TRAY_APP.set_state(AppState.RECORDING)
     AUDIO_BUFFER.clear()
     log("Arm timer fired \u2014 playing start beep")
-    play_start_beep()
+    _play_start_beep()
     time.sleep(0.02)
     RECORDING = True
     STREAM = sd.InputStream(samplerate=FS, channels=1, callback=callback, blocksize=FRAMES_PER_BLOCK, dtype=np.int16)
@@ -302,7 +254,11 @@ class TrayApp(QObject):
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
 
-        self.icons = generate_icons()
+        self.icons = {
+            AppState.IDLE: QIcon(str(_pkg_files("voice_input") / "static" / "idle.svg")),
+            AppState.RECORDING: QIcon(str(_pkg_files("voice_input") / "static" / "recording.svg")),
+            AppState.TRANSCRIBING: QIcon(str(_pkg_files("voice_input") / "static" / "transcribing.svg")),
+        }
 
         self.tray = QSystemTrayIcon()
         self.tray.setIcon(self.icons[AppState.IDLE])
@@ -354,90 +310,14 @@ class TrayApp(QObject):
         return self.app.exec()
 
 
-DEFAULT_CONFIG_TOML = """# Voice Input configuration
-# Uncomment and modify values as needed.
-
-# Path to whisper model file (.bin)
-# model = "/projects/ai/whisper.cpp/models/ggml-small.bin"
-
-# Hotkey key name: shift_r, insert, f1, f2, space, etc.
-# key = "insert"
-
-# Operating mode: "push-to-talk" or "toggle"
-# mode = "push-to-talk"
-
-# Save recordings for quality analysis (saves WAV + transcript to recordings_dir)
-# save_recordings = false
-
-# Directory for saved recordings (only used if save_recordings = true)
-# recordings_dir = "~/.voice-input/recordings"
-
-[whisper]
-# Number of threads to use during computation
-# n_threads = 4
-
-# Maximum number of text context tokens to accumulate across calls (0 = disable context)
-# n_max_text_ctx = 224
-
-# Spoken language: "auto" for auto-detect, or language code like "en", "ru", "de"
-# language = "auto"
-
-# Sampling temperature (0.0 = greedy, up to 1.0)
-# temperature = 0.0
-
-# Temperature increment for fallback on greedy failure (0 = no fallback)
-# temperature_inc = 0.2
-
-# Suppress non-speech tokens
-# suppress_nst = false
-
-# Do not use past transcription as context for the decoder
-# no_context = false
-
-# Translate from source language to English
-# translate = false
-
-# Force single segment output
-# single_segment = false
-
-# Maximum segment length in characters (0 = no limit)
-# max_len = 0
-
-# Split on word boundaries rather than on token boundaries
-# split_on_word = false
-
-# Suppress blank output at the beginning of transcription
-# suppress_blank = true
-
-# Do not generate timestamps
-# no_timestamps = true
-
-# Initial prompt for transcription context (max n_text_ctx / 2 tokens)
-# initial_prompt = ""
-
-# Always prepend initial_prompt to the start of every decode window
-# carry_initial_prompt = false
-
-# Regular expression matching tokens to suppress
-# suppress_regex = ""
-
-# Enable built-in Voice Activity Detection in whisper.cpp
-# vad = false
-
-# Print special tokens (e.g., [SOT], [EOT], [BLANK])
-# print_special = false
-
-# Enable debug mode
-# debug_mode = false
-"""
-
 def main():
     global CFG, WHISPER_MODEL
     os.makedirs(os.path.expanduser("~/.config/voice-input"), exist_ok=True)
     config_path = os.path.expanduser("~/.config/voice-input/config.toml")
     if not os.path.exists(config_path):
+        default_cfg = (_pkg_files("voice_input") / "templates" / "config.toml").read_text()
         with open(config_path, "w") as f:
-            f.write(DEFAULT_CONFIG_TOML)
+            f.write(default_cfg)
     CFG = build_config()
     try:
         WHISPER_MODEL = WhisperModel(

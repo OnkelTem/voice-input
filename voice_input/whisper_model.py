@@ -1,11 +1,9 @@
 from __future__ import annotations
 import time
-from pathlib import Path
 import numpy as np
 from typing import Any
 from cffi import FFI
-
-_HERE = Path(__file__).parent
+from importlib.resources import files as _pkg_files
 
 ffi = FFI()
 
@@ -103,7 +101,7 @@ ffi.cdef("""
     void whisper_log_set(void (*callback)(int level, const char * text, void * user_data), void * user_data);
 """)
 
-_LIB = ffi.dlopen(str(_HERE / "whisper_helper.so"))
+_LIB = ffi.dlopen(str(_pkg_files("voice_input") / "whisper_helper.so"))
 
 
 class WhisperModel:
@@ -199,7 +197,6 @@ class WhisperModel:
                 self._log_fn(f"Unsupported type for {key}: {type(value).__name__}")
 
     def transcribe(self, samples: np.ndarray) -> str:
-        # Normalize audio: int16 → float32 [-1,1]; float32 → use as-is
         if samples.dtype == np.int16:
             audio = samples.astype(np.float32) / 32768.0
         elif samples.dtype == np.float32:

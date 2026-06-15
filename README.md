@@ -40,6 +40,15 @@ voice-input
 systemctl --user status voice-input
 ```
 
+### Разработка (без установки)
+
+```bash
+cd /projects/ai/voice-input
+make
+source .venv/bin/activate
+python -m voice_input.voice_daemon
+```
+
 Press and hold **INSERT** (по умолчанию, настраивается в конфиге) to record,
 release to transcribe.
 
@@ -64,7 +73,6 @@ CLI flags override config file values:
 - `paplay` (pulseaudio-utils) — звук старта
 - Python 3.12+
 - PyQt5 — system tray indicator
-- Pillow — tray icon generation
 - cffi — обёртка для whisper.cpp (whisper_helper.so)
 - `python-xlib` — X11 key state polling
 - `scipy` — WAV file I/O

@@ -1,0 +1,75 @@
+# Voice Input configuration
+# Uncomment and modify values as needed.
+
+# Path to whisper model file (.bin)
+# model = "/projects/ai/whisper.cpp/models/ggml-small.bin"
+
+# Hotkey key name: shift_r, insert, f1, f2, space, etc.
+# key = "insert"
+
+# Operating mode: "push-to-talk" or "toggle"
+# mode = "push-to-talk"
+
+# Save recordings for quality analysis (saves WAV + transcript to recordings_dir)
+# save_recordings = false
+
+# Directory for saved recordings (only used if save_recordings = true)
+# recordings_dir = "~/.voice-input/recordings"
+
+[whisper]
+# Number of threads to use during computation
+# n_threads = 4
+
+# Maximum number of text context tokens to accumulate across calls (0 = disable context)
+# n_max_text_ctx = 224
+
+# Spoken language: "auto" for auto-detect, or language code like "en", "ru", "de"
+# language = "auto"
+
+# Sampling temperature (0.0 = greedy, up to 1.0)
+# temperature = 0.0
+
+# Temperature increment for fallback on greedy failure (0 = no fallback)
+# temperature_inc = 0.2
+
+# Suppress non-speech tokens
+# suppress_nst = false
+
+# Do not use past transcription as context for the decoder
+# no_context = false
+
+# Translate from source language to English
+# translate = false
+
+# Force single segment output
+# single_segment = false
+
+# Maximum segment length in characters (0 = no limit)
+# max_len = 0
+
+# Split on word boundaries rather than on token boundaries
+# split_on_word = false
+
+# Suppress blank output at the beginning of transcription
+# suppress_blank = true
+
+# Do not generate timestamps
+# no_timestamps = true
+
+# Initial prompt for transcription context (max n_text_ctx / 2 tokens)
+# initial_prompt = ""
+
+# Always prepend initial_prompt to the start of every decode window
+# carry_initial_prompt = false
+
+# Regular expression matching tokens to suppress
+# suppress_regex = ""
+
+# Enable built-in Voice Activity Detection in whisper.cpp
+# vad = false
+
+# Print special tokens (e.g., [SOT], [EOT], [BLANK])
+# print_special = false
+
+# Enable debug mode
+# debug_mode = false

@@ -14,6 +14,10 @@ for cmd in python3 xdotool; do
   fi
 done
 
+# Generate static assets
+make -C "$SCRIPT_DIR" static
+echo "✓ Static assets generated"
+
 # Install Python package
 if command -v pipx &>/dev/null; then
   pipx install "$SCRIPT_DIR" --force

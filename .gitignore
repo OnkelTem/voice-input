@@ -30,3 +30,8 @@ htmlcov/
 # Transient audio files
 *.wav
 *.so
+
+# Generated assets (built by make static)
+voice_input/static/*.svg
+voice_input/static/*.wav
+voice_input/whisper_helper.so
