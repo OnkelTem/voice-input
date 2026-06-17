@@ -16,6 +16,9 @@
 # Directory for saved recordings (only used if save_recordings = true)
 # recordings_dir = "~/.voice-input/recordings"
 
+# Minimum recording duration in seconds (shorter recordings are cancelled)
+# min_duration = 1.0
+
 [whisper]
 # Number of threads to use during computation
 # n_threads = 4

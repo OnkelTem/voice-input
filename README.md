@@ -61,6 +61,7 @@ CLI flags override config file values:
 | Flag | Default | Description |
 |---|---|---|
 | `--config PATH` | `~/.config/voice-input/config.toml` | Config file path |
+| `min_duration` | `1.0` | Minimum recording duration in seconds (shorter recordings are cancelled) |
 
 ## Requirements
 

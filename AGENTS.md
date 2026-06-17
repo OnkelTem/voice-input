@@ -13,7 +13,7 @@ python -m voice_input.voice_daemon
 
 ## Architecture
 
-- **Push-to-talk**: Hold INSERT (default, configurable) to record, release to transcribe. A 50ms arm timer prevents accidental taps; recordings under 2 seconds are cancelled.
+- **Push-to-talk**: Hold INSERT (default, configurable) to record, release to transcribe. A 50ms arm timer prevents accidental taps; recordings under `min_duration` (default 1s, configurable) are cancelled.
 - **Audio**: `sounddevice` captures 16 kHz mono float32 into in-memory NumPy buffer; WAV written only when `save_recordings` is enabled — numpy array passed directly to `WhisperModel.transcribe()`.
 - **Transcription**: In-process whisper.cpp via cffi (`whisper_model.py`). Loads `libwhisper.so.1` through a thin C helper (`whisper_helper.c` → `whisper_helper.so`) that accepts `whisper_full_params*` by pointer, avoiding cffi struct-by-value ABI mismatches. `whisper_full_default_params_by_ref()` provides a properly laid-out heap struct. Model loads once at startup, context accumulates via `n_max_text_ctx`. `WhisperModel.transcribe()` takes numpy array directly (float32 pass-through, int16 also normalised to float32).
 - **Language**: Auto-detect.

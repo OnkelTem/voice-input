@@ -18,7 +18,7 @@ Two practical concerns were addressed:
 1. **Accidental taps** — a 50ms arming timer prevents recording on quick
    inadvertent presses. If the key is released before the timer fires, no
    recording starts.
-2. **Very short recordings** — if the recording lasts less than 2 seconds,
+2. **Very short recordings** — if the recording lasts less than 1 second (configurable via min_duration),
    transcription is skipped and a "Cancelled" notification is shown.
 
 ## Decision
@@ -29,6 +29,6 @@ The code structure supports a future `mode = "toggle"` option.
 - **Positive:** More intuitive — hold to record, release to transcribe
 - **Positive:** Single-action recording; no second press needed
 - **Positive:** 50ms arm timer filters out accidental taps
-- **Positive:** 2-second minimum prevents wasted transcription on short bursts
+- **Positive:** 1-second minimum (configurable via min_duration) prevents wasted transcription on short bursts
 - **Negative:** Requires holding the key for the entire recording duration
 - **Negative:** Slightly more complex state machine (IDLE → ARMING → RECORDING)

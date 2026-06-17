@@ -155,7 +155,7 @@ def _stop_stream_and_transcribe():
     log("Stream stopped for transcription")
     with LOCK:
         elapsed = time.monotonic() - PRESS_TIME
-    if elapsed < 2.0:
+    if elapsed < CFG["min_duration"]:
         log("Recording cancelled (too short)")
         with LOCK:
             AUDIO_BUFFER.clear()

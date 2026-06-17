@@ -9,6 +9,7 @@ def load_config(config_path: str) -> dict:
         "key": "insert",
         "save_recordings": False,
         "recordings_dir": os.path.expanduser("~/.voice-input/recordings"),
+        "min_duration": 1.0,
         "whisper": {},
     }
     try:
