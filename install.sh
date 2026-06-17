@@ -20,8 +20,13 @@ echo "✓ Static assets generated"
 
 # Install Python package
 if command -v pipx &>/dev/null; then
-  pipx install "$SCRIPT_DIR" --force
-  echo "✓ Installed via pipx"
+  if pipx install --editable "$SCRIPT_DIR" --force 2>/dev/null; then
+    echo "✓ Installed via pipx (editable)"
+  else
+    # fallback для старых версий pipx (<1.2.0)
+    pipx install "$SCRIPT_DIR" --force
+    echo "✓ Installed via pipx"
+  fi
 else
   echo "pipx not found, installing via pip --user"
   pip install --user -e "$SCRIPT_DIR"

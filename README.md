@@ -15,14 +15,12 @@ sudo apt install xdotool libportaudio2 portaudio19-dev
 ### Установка voice-input
 
 ```bash
-cd /projects/ai/voice-input
 ./install.sh
 ```
 
 ### Удаление
 
 ```bash
-cd /projects/ai/voice-input
 ./uninstall.sh
 ```
 
@@ -43,7 +41,6 @@ systemctl --user status voice-input
 ### Разработка (без установки)
 
 ```bash
-cd /projects/ai/voice-input
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
@@ -64,9 +61,6 @@ CLI flags override config file values:
 | Flag | Default | Description |
 |---|---|---|
 | `--config PATH` | `~/.config/voice-input/config.toml` | Config file path |
-| `--model PATH` | `/projects/ai/whisper.cpp/models/ggml-small.bin` | Whisper model path |
-| `--key NAME` | `insert` | Hotkey (shift_r, insert, f1, f2, space, etc.) |
-| `--mode NAME` | `push-to-talk` | Operating mode (push-to-talk or toggle) |
 
 ## Requirements
 

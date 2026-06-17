@@ -35,6 +35,7 @@ WHISPER_MODEL: WhisperModel | None = None
 LISTENER = None
 POLL_THREAD = None
 STOP_POLL = False
+LOCK = threading.Lock()
 
 FRAMES_PER_BLOCK = 512
 
@@ -55,9 +56,6 @@ def log(msg: str) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Voice input daemon")
-    parser.add_argument("--model", type=str, default=None, help="Model path")
-    parser.add_argument("--key", type=str, default=None, help="Toggle key name")
-    parser.add_argument("--mode", type=str, default=None, help="Operating mode (push-to-talk or toggle)")
     parser.add_argument("--config", type=str, default=None, help="Config file path")
     return parser.parse_args()
 
@@ -66,10 +64,6 @@ def build_config() -> dict:
     args = parse_args()
     config_path = args.config or os.path.expanduser("~/.config/voice-input/config.toml")
     cfg = load_config(config_path)
-    for k in ("model", "key", "mode"):
-        v = getattr(args, k, None)
-        if v is not None:
-            cfg[k] = v
     cfg["key"] = getattr(kb.Key, cfg["key"].lower(), kb.Key.insert)
     return cfg
 
@@ -101,26 +95,31 @@ def on_press(key):
         return
     if CFG["mode"] != "push-to-talk":
         return
-    if RECORDING or ARM_TIMER is not None:
-        return
-    log("Key pressed")
-    PRESS_TIME = time.monotonic()
-    ARM_TIMER = threading.Timer(0.05, _arm_timer)
-    ARM_TIMER.start()
+    with LOCK:
+        if RECORDING or ARM_TIMER is not None:
+            return
+        log("Key pressed")
+        PRESS_TIME = time.monotonic()
+        ARM_TIMER = threading.Timer(0.05, _arm_timer)
+        ARM_TIMER.start()
 
 
 def _arm_timer():
     global RECORDING, STREAM, ARM_TIMER, RECORD_START, AUDIO_BUFFER
-    ARM_TIMER = None
+    with LOCK:
+        if STREAM is not None or RECORDING:
+            ARM_TIMER = None
+            return
+        ARM_TIMER = None
+        AUDIO_BUFFER.clear()
+        RECORDING = True
+        STREAM = sd.InputStream(samplerate=FS, channels=1, callback=callback, blocksize=FRAMES_PER_BLOCK)
+        STREAM.start()
+        RECORD_START = time.monotonic()
     TRAY_APP.set_state(AppState.RECORDING)
-    AUDIO_BUFFER.clear()
     log("Arm timer fired \u2014 playing start beep")
     _play_start_beep()
     time.sleep(0.02)
-    RECORDING = True
-    STREAM = sd.InputStream(samplerate=FS, channels=1, callback=callback, blocksize=FRAMES_PER_BLOCK)
-    STREAM.start()
-    RECORD_START = time.monotonic()
     log("Recording started")
 
 def on_release(key):
@@ -129,68 +128,75 @@ def on_release(key):
         return
     if CFG["mode"] != "push-to-talk":
         return
-    if ARM_TIMER is not None:
-        ARM_TIMER.cancel()
-        ARM_TIMER = None
-        log("Key released \u2014 arm cancelled")
-        return
-    if not RECORDING:
-        return
-    RECORDING = False
-    if STREAM:
-        STREAM.stop()
-        STREAM.close()
-        STREAM = None
+    with LOCK:
+        if ARM_TIMER is not None:
+            ARM_TIMER.cancel()
+            ARM_TIMER = None
+            log("Key released \u2014 arm cancelled")
+            return
+        if not RECORDING:
+            return
+        RECORDING = False
+        if STREAM:
+            STREAM.stop()
+            STREAM.close()
+            STREAM = None
     log("Key released")
     _stop_stream_and_transcribe()
 
 
 def _stop_stream_and_transcribe():
     global AUDIO_BUFFER, STREAM, RECORD_START, PRESS_TIME
-    if STREAM:
-        STREAM.stop()
-        STREAM.close()
-        STREAM = None
+    with LOCK:
+        if STREAM:
+            STREAM.stop()
+            STREAM.close()
+            STREAM = None
     log("Stream stopped for transcription")
-    elapsed = time.monotonic() - PRESS_TIME
+    with LOCK:
+        elapsed = time.monotonic() - PRESS_TIME
     if elapsed < 2.0:
         log("Recording cancelled (too short)")
-        AUDIO_BUFFER.clear()
+        with LOCK:
+            AUDIO_BUFFER.clear()
         TRAY_APP.set_state(AppState.IDLE)
         return
     TRAY_APP.set_state(AppState.TRANSCRIBING)
-    if AUDIO_BUFFER:
-        data = np.concatenate(AUDIO_BUFFER)
-        AUDIO_BUFFER.clear()
-        log(f"Transcribing ({len(data)/FS:.1f}s)...")
-        stem = None
-        if CFG.get("save_recordings", False):
-            rec_dir = CFG["recordings_dir"]
-            os.makedirs(rec_dir, exist_ok=True)
-            ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-            duration = len(data) / FS
-            stem = f"{ts}_{duration:.1f}s"
-            wav_path = os.path.join(rec_dir, stem + ".wav")
-            wav.write(wav_path, FS, data)
-            log(f"Recording saved: {wav_path}")
-        text = ""
-        if WHISPER_MODEL is not None:
-            try:
-                text = WHISPER_MODEL.transcribe(data)
-            except Exception as e:
-                log(f"Transcription error: {e}")
-        if text:
-            if text[-1] in ".?!":
-                text += " "
-            subprocess.run(["xdotool", "type", text])
-            log(f"Transcribed: {text}")
-            if CFG.get("save_recordings", False) and stem:
-                txt_path = os.path.join(rec_dir, stem + ".txt")
-                with open(txt_path, "w") as tf:
-                    tf.write(text + "\n")
-                log(f"Transcript saved: {txt_path}")
+    with LOCK:
+        if AUDIO_BUFFER:
+            data = np.concatenate(AUDIO_BUFFER)
+            AUDIO_BUFFER.clear()
         else:
-            log("No speech detected")
+            data = np.array([], dtype=np.float32)
+    log(f"Transcribing ({len(data)/FS:.1f}s)...")
+    stem = None
+    if CFG.get("save_recordings", False):
+        rec_dir = CFG["recordings_dir"]
+        os.makedirs(rec_dir, exist_ok=True)
+        ts = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        duration = len(data) / FS
+        stem = f"{ts}_{duration:.1f}s"
+        wav_path = os.path.join(rec_dir, stem + ".wav")
+        wav.write(wav_path, FS, data)
+        log(f"Recording saved: {wav_path}")
+    text = ""
+    if WHISPER_MODEL is not None:
+        try:
+            text = WHISPER_MODEL.transcribe(data)
+        except Exception as e:
+            log(f"Transcription error: {e}")
+    if text:
+        if text[-1] in ".?!":
+            text += " "
+        subprocess.run(["xdotool", "type", text])
+        log(f"Transcribed: {text}")
+        if CFG.get("save_recordings", False) and stem:
+            txt_path = os.path.join(rec_dir, stem + ".txt")
+            with open(txt_path, "w") as tf:
+                tf.write(text + "\n")
+            log(f"Transcript saved: {txt_path}")
+    else:
+        log("No speech detected")
     TRAY_APP.set_state(AppState.IDLE)
     log("Transcription complete")
 
@@ -207,13 +213,17 @@ def _x11_poll_worker():
             return
         log(f"Poll worker started, tracking keycode={keycode} (vk={hex(target_vk)})")
         while not STOP_POLL:
-            if RECORDING:
-                data = dpy.query_keymap()
-                bit_down = bool(data[keycode // 8] & (1 << (keycode % 8)))
-                if not bit_down:
-                    log("Poll worker: key release detected")
-                    RECORDING = False
-                    _stop_stream_and_transcribe()
+            key_released = False
+            with LOCK:
+                if RECORDING and STREAM is not None:
+                    data = dpy.query_keymap()
+                    bit_down = bool(data[keycode // 8] & (1 << (keycode % 8)))
+                    if not bit_down:
+                        log("Poll worker: key release detected")
+                        RECORDING = False
+                        key_released = True
+            if key_released:
+                _stop_stream_and_transcribe()
             time.sleep(0.05)
         dpy.close()
         log("Poll worker stopped")
